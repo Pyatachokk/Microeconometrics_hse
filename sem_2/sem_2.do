@@ -1,148 +1,95 @@
-*** DATA: milkfood.dta ***
+*************************************************
+* Ratnikova T.A. Applyed microeconometrics  2019*
+* Analysis of poolability data to panel  10.09  *
+*************************************************
 
-/* Is it possible to make a panel? (poolability) */
+xtset country t
+xtdes
+xtline milk, overlay legend(off) title(milk prices)
+xtline milk, i(name) t(t)
+xtsum country t gdp_ppc milk faoprice
 
-replace milk=ln(milk)
-replace gdp_ppc=ln(gdp_ppc)
+/* Is our panel balance for our model? */
+egen cntm=count(milk), by(country)
+egen cntu=count(gdp_ppc), by(country)
+browse country t cntm cntu
 
+/* Renumbering of country */
 gen con=country if country<18
-replace con=150 if country==18
 replace con=country-1 if country>18
+replace con=31 if country==18
 
-  
-/* by country */
+kdensity milk
+gen lmilk=ln(milk)
+gen lgdp_ppc=ln(gdp_ppc)
+kdensity lmilk
+kdensity lgdp_ppc
 
-** 
-egen mcmilk=mean(milk), by(country)
-gen dcmilk=milk-mcmilk
+/* Generation means on t by each country */
+egen milmilk=mean(lmilk), by(country) 
+egen milgdp_ppc=mean(lgdp_ppc), by(country)
 
-egen mcgdp_ppc=mean(gdp_ppc), by(country)
-gen dcgdp_ppc=gdp_ppc-mcgdp_ppc
- 
-**************************************************
-  
-/* оценивание модели (0) без ограничений */
-scalar rss_0=0
-scalar n_0=0
-forvalues i=1/30 {
- *display "country=`i'"
- quiet reg dcmilk dcgdp_ppc if con==`i'
- est store reg`i' 
- scalar rss`i'=e(rss)
- scalar n`i'=e(N)
- scalar rss_0=rss_0+rss`i'
- scalar n_0=n_0+n`i'
- }
- *** k - number of all parameters in model (alphas and betas)
-scalar k_0=30*(2)
-scalar df_0=(n_0-k_0)
-est tab reg1 reg2 reg3 reg4 reg5 reg6 reg7, star(0.1 0.05 0.01) b(%7.4f)
+/* Generation deviations from means on t by each country */
+gen dilmilk=lmilk-milmilk
+gen dilgdp_ppc=lgdp_ppc-milgdp_ppc
 
-/* оценивание модели с ограничением (1) */
-scalar rss_1=0
-scalar n_1=0
-reg dcmilk dcgdp_ppc, noconst
-scalar rss_1= e(rss)
-scalar n_1=e(N)
-** number of K=30dummies+1beta
-scalar k_1=31
-scalar df_1=(n_1-k_1)
+/* Estimation of model (0) without restriction */
+scalar rss_ur=0
+scalar n_ur=0
+scalar df_ur=0
+forvalue i=1/30 {
+qui reg dilmilk dilgdp_ppc if con==`i'
+scalar z`i'=e(rss)
+scalar df`i'=e(df_r)
+scalar n`i'=e(N)
+scalar rss_ur=rss_ur+z`i'
+scalar n_ur=n_ur+n`i'
+scalar df_ur=df_ur+df`i'
+scalar list rss_ur n_ur df_ur 
+}
 
-/* оценивание модели с ограничением (2) */
-scalar rss_2=0
-scalar n_2=0
-reg milk gdp_ppc
-scalar rss_2 = e(rss)
-scalar n_2=e(N)
-scalar k_2=(2)
-scalar df_2=(n_2-k_2)
+scalar list rss_ur n_ur df_ur 
 
-/* вычисление тестовых статистик и их p-values */
-/* test models 1 vs 0 */
-scalar fh1=((rss_1-rss_0)/(df_1-df_0))/((rss_0)/(df_0))
-scalar pval1 = Ftail(df_1-df_0,df_0,fh1)
-** 
+/* Estimation of model (1) with FE of country */
+qui reg dilmilk dilgdp_ppc
+scalar rss_r1 = e(rss)
+scalar n_r1=e(N)
+scalar df_r1=e(df_r)
+scalar list rss_r1 n_r1 df_r1
 
-/* test models 2 vs 0 */
-scalar fh2=((rss_2-rss_0)/(df_2-df_0))/((rss_0)/(df_0))
-scalar pval2 = Ftail(df_2-df_0,df_0,fh2)
+scalar list rss_r1 n_r1 df_r1 
+scalar df_r1_cor = df_r1 - 29
+scalar list rss_r1 n_r1 df_r1_cor
 
-/* test models 2 vs 1 */
-scalar fh3=((rss_2-rss_1)/(df_2-df_1))/((rss_1)/(df_1))
-scalar pval3 = Ftail(df_2-df_1,df_1,fh3)
+/* Estimation of model (2) Pool */
+qui reg lmilk lgdp_ppc 
+scalar rss_r2 = e(rss)
+scalar n_r2=e(N)
+scalar df_r2=e(df_r)
+scalar list rss_r2 n_r2 df_r2 
 
-/* просмотр результатов */
-display "test 1"
-scalar list fh1 pval1 
-display "test 2"
-scalar list fh2 pval2   
-display "test 3"
-scalar list fh3 pval3
+/* Calculation of F-statistics and  p-values */
+/*********************************************************/
+scalar fh1 =((rss_r1 - rss_ur)/(df_r1_cor-df_ur))/(rss_ur/df_ur)
+scalar pval1 = Ftail(df_r1_cor-df_ur,df_ur,fh1)
 
+scalar fh2 =((rss_r2 - rss_ur)/(df_r2-df_ur))/(rss_ur/df_ur)
+scalar pval2 = Ftail(df_r2-df_ur,df_ur,fh2)
 
+scalar fh3 =((rss_r2-rss_r1)/(df_r2-df_r1_cor))/(rss_r1/df_r1_cor)
+scalar pval3 = Ftail(df_r2-df_r1_cor,df_r1_cor,fh3)
+scalar list pval1 pval2 pval3  fh1 fh2 fh3
 
+/* Calculation df check */
+/*********************************************************/
+scalar fh1 =((rss_r1 - rss_ur)/(60-31))/(rss_ur/(n_ur-60))
+scalar pval1 = Ftail(60-31,n_ur-60,fh1)
 
+scalar fh2 =((rss_r2 - rss_ur)/(60-2))/(rss_ur/(n_ur-60))
+scalar pval2 = Ftail(60-2,n_ur-60,fh2)
 
-**************************************************
-**************************************************
-/* by years */
-egen mtmilk=mean(milk), by(t)
-gen dtmilk=milk-mtmilk
+scalar fh3 =((rss_r2-rss_r1)/(31-2))/(rss_r1/(n_r1-31))
+scalar pval3 = Ftail(31-2,n_r1-31,fh3)
 
-egen mtgdp_ppc=mean(gdp_ppc), by(t)
-gen dtgdp_ppc=gdp_ppc-mtgdp_ppc
-
-/* оценивание модели (0) без ограничений */
-scalar rss_0=0
-scalar n_0=0
-forvalues y=1993/2008 {
- *display "t=`y'"
- quiet reg dtmilk dtgdp_ppc if t == `y'
- est store reg`y' 
- scalar rss`y'=e(rss)
- scalar n`y'=e(N)
- scalar rss_0=rss_0+rss`y'
- scalar n_0=n_0+n`y'
- }
-scalar k_0=16*(2)
-scalar df_0=(n_0-k_0)
-est tab reg1 reg2 reg3 reg4 reg5 reg6 reg7, star(0.1 0.05 0.01) b(%7.4f)
-
-/* оценивание модели с ограничением (1) */
-scalar rss_1=0
-scalar n_1=0
-reg dtmilk dtgdp_ppc, noconst
-scalar rss_1= e(rss)
-scalar n_1=e(N)
-scalar k_1=1+16
-scalar df_1=(n_1-k_1)
-
-/* оценивание модели с ограничением (2) */
-scalar rss_2=0
-scalar n_2=0
-reg milk gdp_ppc
-scalar rss_2 = e(rss)
-scalar n_2=e(N)
-scalar k_2=(2)
-scalar df_2=(n_2-k_2)
-
-/* вычисление тестовых статистик и их p-values */
-/* test 1 */
-scalar fh1=((rss_1-rss_0)/(df_1-df_0))/((rss_0)/(df_0))
-scalar pval1 = Ftail(df_1-df_0,df_0,fh1)
-
-/* test 2 */
-scalar fh2=((rss_2-rss_0)/(df_2-df_0))/((rss_0)/(df_0))
-scalar pval2 = Ftail(df_2-df_0,df_0,fh2)
-
-/* test 3 */
-scalar fh3=((rss_2-rss_1)/(df_2-df_1))/((rss_1)/(df_1))
-scalar pval3 = Ftail(df_2-df_1,df_1,fh3)
-
-/* просмотр результатов */
-display "test 1"
-scalar list fh1 pval1 
-display "test 2"
-scalar list fh2 pval2   
-display "test 3"
-scalar list fh3 pval3
+/* Display of results */
+scalar list pval1 pval2 pval3  fh1 fh2 fh3
