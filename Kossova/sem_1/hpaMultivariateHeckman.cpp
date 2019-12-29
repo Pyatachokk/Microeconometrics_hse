@@ -1,0 +1,151 @@
+#include <RcppArmadillo.h>               //Ïîäêëþ÷àåì áèáëèîòåêó
+
+using namespace Rcpp;                    //Èñïîëüçóåì ïðîñòðàíñòâî èìåí
+
+// [[Rcpp::depends(RcppArmadillo, hpa)]]
+
+
+// [[Rcpp::export]]    
+double PGNSelectionLikelihoodRcpp(
+  NumericVector x, NumericVector y_d,
+  NumericVector z1_d, NumericVector z2_d,
+  NumericMatrix y_id, NumericMatrix z1_id, NumericMatrix z2_id,
+  NumericVector y_coef_ind,
+  NumericVector z1_coef_ind, NumericVector z2_coef_ind,
+  NumericVector pol_coefficients_ind, NumericVector pol_degrees,
+  NumericVector mean_ind, NumericVector sd_ind) {
+  //Initialize matin values
+    //Polynomial coefficients
+  int pol_coefficients_n = pol_coefficients_ind.size() + 1;
+  NumericVector pol_coefficients(pol_coefficients_n);
+  pol_coefficients[0]= 1;
+  pol_coefficients[pol_coefficients_ind] = x[pol_coefficients_ind - 1];
+    //Mean
+  NumericVector mean(3);
+  std::fill(mean.begin(), mean.end(), 0);
+    //Standard deviation
+  NumericVector sd(3);
+  std::fill(sd.begin(), sd.end() - 1, 1);
+  sd[2] = as<double> (x[sd_ind - 1]);
+    //y coefficients
+  arma::vec y_coef = as<arma::vec> (x[y_coef_ind - 1]);
+     //z1 coefficients
+  int z1_coef_n = z1_coef_ind.size();
+  arma::vec z1_coef(z1_coef_n + 1);
+  z1_coef(0) = 1;
+  for (int i = 0; i < z1_coef_n; i++)
+  {
+    z1_coef(i + 1) = (double)(x[z1_coef_ind[0] + i - 1]);
+  }
+     //z2 coefficients
+  int z2_coef_n = z2_coef_ind.size();
+  arma::vec z2_coef(z2_coef_n + 1);
+  z2_coef(0) = 1;
+  for (int i = 0; i < z2_coef_n; i++)
+  {
+    z2_coef(i+1) = (double)(x[z2_coef_ind[0] + i - 1]);
+  }
+  //Sample size
+  int n = y_d.size();
+  //Create infinity vectors
+  NumericVector inf_lower(n);
+  std::fill(inf_lower.begin(), inf_lower.end(), R_NegInf);
+  NumericVector inf_upper(n);
+  std::fill(inf_upper.begin(), inf_upper.end(), R_PosInf);
+  //Calculate predicted values
+  NumericVector y_h = wrap((as<arma::mat> (y_id)) * y_coef);
+  NumericVector z1_h = wrap((as<arma::mat> (z1_id)) * z1_coef);
+  NumericVector z2_h = wrap((as<arma::mat> (z2_id)) * z2_coef);
+  NumericVector e_h = y_d - y_h;
+  //Connect libraries
+  //Function ihpa = myEnv["ihpa"];
+  //DL_FUNC dhpa = reinterpret_cast<DL_FUNC>( R_ExternalPtrAddr(my_env["dhpa_Rcpp"]));
+  //Function dhpa = myEnv["dhpa"];
+  //DL_FUNC ihpa = reinterpret_cast<DL_FUNC>( R_ExternalPtrAddr(my_env["ihpa_Rcpp"]));
+  //Calculate likelihoods
+  /////////
+  //1 1
+  /////////
+  LogicalVector cond = ((z1_d == 1) & (z2_d == 1));
+    //x_lower and upper
+  NumericMatrix x_lower(as<NumericVector>(e_h[cond]).size(),3);
+    x_lower(_,0) = -1.0 * as<NumericVector>(z1_h[cond]);
+    x_lower(_,1) = -1.0 * as<NumericVector>(z2_h[cond]);
+    x_lower(_,2) = as<NumericVector>(e_h[cond]);
+  NumericMatrix x_upper(as<NumericVector>(e_h[cond]).size(),3);
+    x_upper(_,0) = as<NumericVector>(inf_upper[cond]);
+    x_upper(_,1) = as<NumericVector>(inf_upper[cond]);
+    x_upper(_,2) = as<NumericVector>(e_h[cond]);
+    //Calculate for z
+  NumericVector l_1_z = hpa:::ihpa(x_lower, x_upper,
+          pol_coefficients,
+          pol_degrees,
+          LogicalVector{false, false, true}, LogicalVector{false, false, false},
+          mean, sd);
+    //Calculate for y
+  NumericVector l_1_y = dhpa(x_lower,
+  pol_coefficients,
+  pol_degrees,
+  LogicalVector{false, false, false}, LogicalVector{true, true, false},
+  mean, sd);
+  NumericVector l_1_1 = log(l_1_y) + log(l_1_z);
+  /////////
+  //1 0
+  /////////
+  cond = ((z1_d==1) & (z2_d==0));
+  //x_lower and upper
+  x_lower = NumericMatrix(as<NumericVector>(e_h[cond]).size(),3);
+    x_lower(_,0) = -1.0 * as<NumericVector>(z1_h[cond]);
+    x_lower(_,1) = as<NumericVector>(inf_lower[cond]);
+    x_lower(_,2) = as<NumericVector>(e_h[cond]);
+  x_upper = NumericMatrix(as<NumericVector>(e_h[cond]).size(),3);
+    x_upper(_,0) = as<NumericVector>(inf_upper[cond]);
+    x_upper(_,1) = -1.0 * as<NumericVector>(z2_h[cond]);
+    x_upper(_,2) = as<NumericVector>(e_h[cond]);
+  NumericVector l_1_0 = ihpa(x_lower, x_upper,
+  pol_coefficients,
+  pol_degrees,
+  LogicalVector{false, false, false}, LogicalVector{false, false, true},
+  mean, sd);
+  l_1_0 = log(l_1_0);
+  /////////
+  //0 1
+  /////////
+  cond = ((z1_d==0) & (z2_d==1));
+  //x_lower and upper
+  x_lower = NumericMatrix(as<NumericVector>(e_h[cond]).size(),3);
+  x_lower(_,0) = as<NumericVector>(inf_lower[cond]);
+    x_lower(_,1) = -1.0 * as<NumericVector>(z2_h[cond]);
+    x_lower(_,2) = as<NumericVector>(e_h[cond]);
+  x_upper = NumericMatrix(as<NumericVector>(e_h[cond]).size(),3);
+  x_upper(_,0) = -1.0 * as<NumericVector>(z1_h[cond]);
+    x_upper(_,1) = as<NumericVector>(inf_upper[cond]);
+    x_upper(_,2) = as<NumericVector>(e_h[cond]);
+  NumericVector l_0_1 = ihpa(x_lower,x_upper,
+  pol_coefficients,
+  pol_degrees,
+  LogicalVector{false, false, false}, LogicalVector{false, false, true},
+  mean, sd);
+  l_0_1 = log(l_0_1);
+  /////////
+  //0 0
+  /////////
+  cond = ((z1_d==0) & (z2_d==0));
+  //x_lower and upper
+  x_lower = NumericMatrix(as<NumericVector>(e_h[cond]).size(),3);
+    x_lower(_,0) = as<NumericVector>(inf_lower[cond]);
+    x_lower(_,1) = as<NumericVector>(inf_lower[cond]);
+    x_lower(_,2) = as<NumericVector>(e_h[cond]);
+  x_upper = NumericMatrix(as<NumericVector>(e_h[cond]).size(),3);
+    x_upper(_,0) = -1.0 * as<NumericVector>(z1_h[cond]);
+    x_upper(_,1) = -1.0 * as<NumericVector>(z2_h[cond]);
+    x_upper(_,2) = as<NumericVector>(e_h[cond]);
+  NumericVector l_0_0 = ihpa(x_lower, x_upper,
+  pol_coefficients,
+  pol_degrees,
+  LogicalVector{false, false, false}, LogicalVector{false, false, true},
+  mean, sd);
+  l_0_0 = log(l_0_0);
+  //Return the result
+  return(-1.0*(sum(l_1_1) + sum(l_1_0) + sum(l_0_1) + sum(l_0_0)));
+  }
